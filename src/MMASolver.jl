@@ -22,7 +22,7 @@ end
     epsilon_min::Float64 = 1e-7
 end
 
-function mmasub(n::Int, m::Int, opt_params::OptimizerParameters, pr_type::MMAProblemType, f0::Float64, fi::Vector{Float64}, df0dx::AbstractVector{Float64}, dfidx::AbstractMatrix{Float64}, x::AbstractVector{Float64}, x_prev::Vector{Float64}, x_pprev::Vector{Float64},
+function mmasub(n::Int, m::Int, opt_params::OptimizerParameters, pr_type::MMAProblemType, f0::Float64, fi::Vector{Float64}, df0dx::AbstractArray{Float64}, dfidx::AbstractArray{Float64}, x::AbstractArray{Float64}, x_prev::AbstractArray{Float64}, x_pprev::AbstractArray{Float64},
     x_min::Vector{Float64}, x_max::Vector{Float64}, l::Vector{Float64}, u::Vector{Float64}, k::Int)
     dfidx = transpose(dfidx)
     x_max_min = x_max - x_min

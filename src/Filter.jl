@@ -86,3 +86,11 @@ function apply_filter(filt::Filter, x::AbstractVector{Float64})
     ρ = filt.T_mean * (C \ (T * x))
     return ρ
 end
+
+function apply_filter(filt::Filter, x::AbstractMatrix{Float64})
+    Kf = filt.Kf
+    T = filt.T
+    C = cholesky(Kf)
+    ρ = filt.T_mean * (C \ (T * x))
+    return ρ
+end
