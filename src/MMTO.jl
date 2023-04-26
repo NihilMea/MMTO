@@ -228,8 +228,6 @@ function solve(mmtop::MMTOProblem, filt::Filter, x_init::Float64, V_lim::Float64
         for col in 1:m
             dfidx_full[:, col] .= apply_filter(filt, dfidx_full[:, col])
         end
-
-
         # The residual vector of the KKT conditions is calculated:
         kktnorm, residumax = kktcheck(m, n, x, y, z, λ, ξ, η, μ, ζ, s, x_min, x_max, [fi], df0dx, dfidx, prob_type)
         print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, "\n")
