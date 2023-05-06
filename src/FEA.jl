@@ -1,5 +1,3 @@
-
-
 Point2D = SVector{2,Float64}
 
 """
@@ -234,7 +232,7 @@ function set_bc!(fea::FEAProblem, type::Symbol, value::Float64, direction::Union
         end
     end
 
-    if !(typeof(direction) isa Vector{Symbol})
+    if !(typeof(direction) == Vector{Symbol})
         direction = [direction]
     end
 

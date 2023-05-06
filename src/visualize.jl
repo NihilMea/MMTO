@@ -1,7 +1,80 @@
-using ColorSchemes
-import GLMakie as Mke
 
-export viz, display_solution
+
+
+function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x::Matrix{Float64}; mat_names::Vector{String}=String[], facets::Bool=false)
+    if type == :Density
+        val, w = calc_mat_type(mmtop, x)
+        mat_num = length(mmtop.E0)
+        mat = mat_num .- argmax.(eachrow(w))
+        fig = viz(mmtop.fea, mat, legend=true, legend_names=mat_names[end:-1:1], colornum=3, colormap=:RdPu_9, showfacets=facets)
+    elseif type == :X_Displ
+        val, w = calc_mat_type(mmtop, x)
+        fea = mmtop.fea
+        Te_size = 4
+        T_nnz = Te_size * fea.num_el
+        iT = zeros(Int, T_nnz)
+        jT = zeros(Int, T_nnz)
+        valN = zeros(Float64, T_nnz)
+        u_n = sol.U[1:2:end]
+        for i in 1:fea.num_el
+            el_dofs = vec(reshape(transpose(fea.nodes_at_elems[i, :]), :, 1))
+            indsT = 4 * (i - 1) .+ (1:4)
+            iT[indsT] = el_dofs
+            jT[indsT] = fill(i, Te_size)
+            valN[indsT] .= 1 / 4
+        end
+        T_mean = transpose(sparse(iT, jT, valN, fea.num_nd, fea.num_el))
+        u = T_mean * u_n
+        u[val.<0.5] .= NaN
+        fig = viz(mmtop.fea, u, colorbar=true, colornum=16, showfacets=facets, colorbar_name="мм")
+    elseif type == :Y_Displ
+        val, w = calc_mat_type(mmtop, x)
+        fea = mmtop.fea
+        Te_size = 4
+        T_nnz = Te_size * fea.num_el
+        iT = zeros(Int, T_nnz)
+        jT = zeros(Int, T_nnz)
+        valN = zeros(Float64, T_nnz)
+        u_n = sol.U[2:2:end]
+        for i in 1:fea.num_el
+            el_dofs = vec(reshape(transpose(fea.nodes_at_elems[i, :]), :, 1))
+            indsT = 4 * (i - 1) .+ (1:4)
+            iT[indsT] = el_dofs
+            jT[indsT] = fill(i, Te_size)
+            valN[indsT] .= 1 / 4
+        end
+        T_mean = transpose(sparse(iT, jT, valN, fea.num_nd, fea.num_el))
+        u = T_mean * u_n
+        u[val.<0.5] .= NaN
+        fig = viz(mmtop.fea, u, colorbar=true, colornum=16, showfacets=facets, colorbar_name="мм")
+    elseif type == :VM_Stress
+        val, w = calc_mat_type(mmtop, x)
+        σ = calc_stress(mmtop.fea, sol, :vM)
+        σ[val.<0.5] .= NaN
+        σ[mmtop.fixed_elements] .= NaN
+        fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
+    elseif type == :X_Stress
+        val, w = calc_mat_type(mmtop, x)
+        σ = calc_stress(mmtop.fea, sol, :x)
+        σ[val.<0.5] .= NaN
+        σ[mmtop.fixed_elements] .= NaN
+        fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
+    elseif type == :X_Stress
+        val, w = calc_mat_type(mmtop, x)
+        σ = calc_stress(mmtop.fea, sol, :y)
+        σ[val.<0.5] .= NaN
+        σ[mmtop.fixed_elements] .= NaN
+        fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
+    elseif type == :X_Stress
+        val, w = calc_mat_type(mmtop, x)
+        σ = calc_stress(mmtop.fea, sol, :y)
+        σ[val.<0.5] .= NaN
+        σ[mmtop.fixed_elements] .= NaN
+        fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
+    else
+        error("Wrong display type")
+    end
+end
 
 #TODO:  improve interface
 """
@@ -13,7 +86,7 @@ export viz, display_solution
 * legend_names - names that show up in the legend ( vector of strings)
 """
 function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
-    colornum::Int=12, colorbar::Bool=false, colormap::Union{Symbol,ColorScheme}=:jet, legend::Bool=false, legend_names::Union{Nothing,Vector{String}}=nothing)
+    colornum::Int=12, colorbar::Bool=false, colorbar_name::String="", colormap::Union{Symbol,ColorScheme}=:jet, legend::Bool=false, legend_names::Union{Nothing,Vector{String}}=nothing)
     if colormap isa Nothing
         colmap = Mke.cgrad(:jet, colornum, categorical=true)
     elseif colormap isa Symbol
@@ -74,20 +147,20 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
             xs[8*elem-1] = vertices[nodes[4], 1]
             xs[8*elem] = vertices[nodes[1], 1]
 
-            ys[8*elem.id-7] = vertices[nodes[1], 2]
-            ys[8*elem.id-6] = vertices[nodes[2], 2]
-            ys[8*elem.id-5] = vertices[nodes[2], 2]
-            ys[8*elem.id-4] = vertices[nodes[3], 2]
-            ys[8*elem.id-3] = vertices[nodes[3], 2]
-            ys[8*elem.id-2] = vertices[nodes[4], 2]
-            ys[8*elem.id-1] = vertices[nodes[4], 2]
-            ys[8*elem.id] = vertices[nodes[1], 2]
+            ys[8*elem-7] = vertices[nodes[1], 2]
+            ys[8*elem-6] = vertices[nodes[2], 2]
+            ys[8*elem-5] = vertices[nodes[2], 2]
+            ys[8*elem-4] = vertices[nodes[3], 2]
+            ys[8*elem-3] = vertices[nodes[3], 2]
+            ys[8*elem-2] = vertices[nodes[4], 2]
+            ys[8*elem-1] = vertices[nodes[4], 2]
+            ys[8*elem] = vertices[nodes[1], 2]
 
         end
         Mke.linesegments!(ax, xs, ys, color=:black, linewidth=0.5)
     end
     if colorbar
-        Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3))
+        Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name)
     end
     return fig
 end

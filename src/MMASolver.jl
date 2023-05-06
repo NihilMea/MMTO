@@ -14,8 +14,8 @@ end
 @with_kw struct OptimizerParameters
     raa0::Float64 = 1e-5
     albefa::Float64 = 0.1
-    move::Float64 = 0.2
-    asyinit::Float64 = 0.4
+    move::Float64 = 0.3
+    asyinit::Float64 = 0.5
     asydecr::Float64 = 0.7
     asyincr::Float64 = 1.2
     res_tol::Float64 = 0.0 # residual tolerance
