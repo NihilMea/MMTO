@@ -1,7 +1,7 @@
 module MMTO
 
 using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes
-import CairoMakie as Mke
+import GLMakie as Mke
 
 
 export Point2D, FEAProblem, calc_stress, update_E!, set_bc!, solve, solve!, elem_dofs
