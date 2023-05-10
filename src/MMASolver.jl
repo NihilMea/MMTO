@@ -14,10 +14,10 @@ end
 @with_kw struct OptimizerParameters
     raa0::Float64 = 1e-5
     albefa::Float64 = 0.1
-    move::Float64 = 0.3
-    asyinit::Float64 = 0.5
+    move::Float64 = 0.05
+    asyinit::Float64 = 0.4
     asydecr::Float64 = 0.7
-    asyincr::Float64 = 1.2
+    asyincr::Float64 = 1.1
     res_tol::Float64 = 0.0 # residual tolerance
     epsilon_min::Float64 = 1e-7
 end

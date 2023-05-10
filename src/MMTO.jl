@@ -1,6 +1,6 @@
 module MMTO
 
-using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes
+using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes, Colors
 import GLMakie as Mke
 
 
@@ -26,12 +26,14 @@ struct MMTOProblem
 
     # x::Vector{Float64} #design variables
     E0::Vector{Float64} # basic materials 
-    p::Float64 # penalization parameter
+    q::Float64 # elastic modulus penalization parameter
+    s::Float64 # stress penalization parameter
+    p::Float64 # p-norm parameter
 end
 
-function MMTOProblem(fea::FEAProblem, E0::Vector{Float64}, p::Float64)
+function MMTOProblem(fea::FEAProblem, E0::Vector{Float64}, q::Float64, s::Float64, p::Float64)
     E0 = vcat(E0, 1e-3)
-    return MMTOProblem(fea, fill(true, fea.num_el), fill(false, fea.num_el), fill(false, fea.num_el), E0, p)
+    return MMTOProblem(fea, fill(true, fea.num_el), fill(false, fea.num_el), fill(false, fea.num_el), E0, q, s, p)
 end
 
 function set_region!(mmtop::MMTOProblem, type::Symbol, p1::Point2D, p2::Point2D)
@@ -77,7 +79,7 @@ function SIMP!(mmtop::MMTOProblem, E::AbstractVector{Float64}, dE::Vector{Float6
 end
 
 function MSIMP!(mmtop::MMTOProblem, E::Vector{Float64}, dE::Matrix{Float64}, x::AbstractMatrix{Float64})
-    p = mmtop.p
+    q = mmtop.q
     E0 = mmtop.E0
     M = length(E0)
     w = zeros(length(E), M)
@@ -85,14 +87,14 @@ function MSIMP!(mmtop::MMTOProblem, E::Vector{Float64}, dE::Matrix{Float64}, x::
 
     for i in 1:M
         if i == 1
-            w[:, i] = prod(x[:, 1:(M-i)] .^ p, dims=2)
-            dwdx[:, i, :] = p ./ x[:, :] .* prod(x[:, 1:(M-i)] .^ p, dims=2)
+            w[:, i] = prod(x[:, 1:(M-i)] .^ q, dims=2)
+            dwdx[:, i, :] = q ./ x[:, :] .* prod(x[:, 1:(M-i)] .^ q, dims=2)
         else
-            w[:, i] = (1 .- x[:, M-i+1]) .^ p .* prod(x[:, 1:(M-i)] .^ p, dims=2)
+            w[:, i] = (1 .- x[:, M-i+1]) .^ q .* prod(x[:, 1:(M-i)] .^ q, dims=2)
             for j in 1:(M-i)
-                dwdx[:, i, j] = p ./ x[:, j] .* prod(x[:, 1:(M-i)] .^ p, dims=2) .* (1 .- x[:, M-i+1]) .^ p
+                dwdx[:, i, j] = q ./ x[:, j] .* prod(x[:, 1:(M-i)] .^ q, dims=2) .* (1 .- x[:, M-i+1]) .^ q
             end
-            dwdx[:, i, M-i+1] = -prod(x[:, 1:(M-i)] .^ p, dims=2) .* p .* (1 .- x[:, M-i+1]) .^ (p - 1)
+            dwdx[:, i, M-i+1] = -prod(x[:, 1:(M-i)] .^ q, dims=2) .* q .* (1 .- x[:, M-i+1]) .^ (q - 1)
         end
     end
     E .= sum(w .* transpose(E0), dims=2)
@@ -147,7 +149,7 @@ function mass!(mmtop::MMTOProblem, df0dx::AbstractMatrix{Float64}, x::AbstractMa
             for j in 1:(M-i)
                 dwdx[:, i, j] = q ./ x[:, j] .* prod(x[:, 1:(M-i)] .^ q, dims=2) .* (1 .- x[:, M-i+1]) .^ q
             end
-            dwdx[:, i, M-i+1] = -prod(x[:, 1:(M-i)] .^ q, dims=2) .* q .* (1 .- x[:, M-i+1]) .^ (q - 1) 
+            dwdx[:, i, M-i+1] = -prod(x[:, 1:(M-i)] .^ q, dims=2) .* q .* (1 .- x[:, M-i+1]) .^ (q - 1)
         end
     end
     act_el_num = length(findall(mmtop.active_elements))
@@ -190,14 +192,14 @@ function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{
     T = [1.0 -0.5 0.0
         -0.5 1.0 0.0
         0.0 0.0 3.0]
-    s = 0.5
-    p = 8
+    s = mmtop.s
     B = mmtop.fea.Bσ
     D0 = mmtop.fea.D0
     Ke0 = mmtop.fea.Ke0
     N = mmtop.fea.num_el
+    p = mmtop.p
     act_elems = sort(union(findall(mmtop.active_elements)))
-    
+
     n_act = length(act_elems)
     dσPNdx = zeros(N)
     dσVMdσ = zeros(N, 3)
@@ -324,7 +326,7 @@ end
 # end
 
 function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x_init::Float64, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int)
-    dens = vcat(dens,1e-12)
+    dens = vcat(dens, 1e-12)
     mat_num = length(mmtop.E0) - 1 # number of materials (void not included)
     n = length(findall(mmtop.active_elements))
     if typeof(constr) == Symbol
@@ -395,7 +397,9 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
 
     kktnorm = kkttol + 100
     outit = 0
-    while (kktnorm > kkttol) & (outit < maxoutit)
+    exit_flag = false
+    exit_count=0
+    while true
         outit = outit + 1
 
         # The MMA subproblem is solved at the point xval:
@@ -418,9 +422,13 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
         sol = solve(fea)
 
         if targ == :Mass_min
-            f0 = mass!(mmtop, df0dx, ρ, dens)
+            f0_new = mass!(mmtop, df0dx, ρ, dens)
+            f0_prev = f0
+            f0 = f0_new
         elseif targ == :Compl_min
-            f0 = compliance!(mmtop, df0dx, sol, E, dE)
+            f0_new = compliance!(mmtop, df0dx, sol, E, dE)
+            f0_prev = f0
+            f0 = f0_new
         end
 
         df0dx_full .= apply_filter(filt, df0dx_full)
@@ -439,23 +447,188 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
         if use_proj
             df0dx_full .= dρdx .* df0dx_full
             dfidx_full .= dρdx .* dfidx_full
-            if outit > 50 && β <= 50.0
+            if outit > 50 && β <= 5.0
                 β += 1.1^outit
             end
         end
         # The residual vector of the KKT conditions is calculated:
-        kktnorm, residumax = kktcheck(m, n, vec(x), y, z, λ, ξ, η, μ, ζ, s, x_min, x_max, fi, vec(reshape(df0dx, :)), reshape(dfidx, :, m), prob_type)
+        # kktnorm, residumax = kktcheck(m, n, vec(x), y, z, λ, ξ, η, μ, ζ, s, x_min, x_max, fi, vec(reshape(df0dx, :)), reshape(dfidx, :, m), prob_type)
+        residu = abs(f0- f0_prev) / f0_prev
+        print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, " residu: ", residu, "\n")
 
-        print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, " KKT norm: ", kktnorm, "\n")
+        if residu < 1e-4
+            if exit_flag
+                exit_count += 1
+            else
+                exit_count = 0
+                exit_flag = true
+            end
+            if exit_count > 6
+                print("Objective function residual is less then 0.01% in 6 iterations")
+                break
+            end
+        elseif outit >= maxoutit
+            print("Finished, reached max iterations")
+            break
+        else
+            exit_flag = false
+        end
     end
-    if (kktnorm <= kkttol)
-        print("Finished, KKT norm is less then tolerance")
-    else
-        print("Finished, reached max iterations")
-    end
-    return sol, ρ_all
+    return sol, ρ_all, outit
 end
 
+function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x::Matrix{Float64}, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int, cur_it::Int)
+    dens = vcat(dens, 1e-12)
+    mat_num = length(mmtop.E0) - 1 # number of materials (void not included)
+    n = length(findall(mmtop.active_elements))
+    if typeof(constr) == Symbol
+        constr = [constr]
+    end
+    m = length(constr) * mat_num
+    opt_params = OptimizerParameters()
+    prob_type = MMAProblemType(1.0, zeros(m), ones(m), fill(1e3, m))
+    fea = mmtop.fea
+
+    x_min = fill(1e-3, n * mat_num)
+    x_max = fill(1.0, n * mat_num)
+    l = copy(x_min)
+    u = copy(x_max)
+    x_all = x
+    x_all[mmtop.passive_elements, :] .= 1e-3
+    x_all[mmtop.fixed_elements, :] .= 1.0
+
+    x = reshape(view(x_all, mmtop.active_elements, :), :, 1)
+    x_prev = copy(x)
+    x_pprev = copy(x)
+
+    E = fea.E
+    dE = zeros(length(E), mat_num)
+
+    ρ_all = apply_filter(filt, x_all)
+    # Heaviside filtration NOTE: not working
+    if use_proj
+        β = 0.0
+        dρdx = zeros(size(ρ_all))
+        apply_projection!(β, ρ_all, dρdx)
+    end
+    ρ = @view ρ_all[mmtop.active_elements, :]
+    MSIMP!(mmtop, E, dE, ρ_all)
+    region_update!(mmtop, ρ_all)
+    sol = solve(fea)
+
+    df0dx_full = zeros(size(x_all))
+    dfidx_full = zeros(size(x_all)..., m)
+    df0dx = view(df0dx_full, mmtop.active_elements, :)
+    dfidx = view(dfidx_full, mmtop.active_elements, :, :)
+
+    if targ == :Mass_min
+        f0 = mass!(mmtop, df0dx, ρ, dens)
+    elseif targ == :Compl_min
+        f0 = compliance!(mmtop, df0dx, sol, E, dE)
+    end
+
+    df0dx_full .= apply_filter(filt, df0dx_full)
+    fi = zeros(m)
+
+    for (i, constraint) in enumerate(constr)
+        for mat in 1:mat_num
+            if constraint == :Stress
+                fi[mat+mat_num*(i-1)] = stress_constraint!(mmtop, mat, view(dfidx_full, :, :, mat + mat_num * (i - 1)), sol, dE, ρ_all, σ_max)
+            elseif constraint == :Volume
+                fi[mat+mat_num*(i-1)] = volume_constraint!(mmtop, mat, view(dfidx_full, :, :, mat + mat_num * (i - 1)), ρ_all, V_lim)
+            end
+            dfidx_full[:, :, mat+mat_num*(i-1)] .= apply_filter(filt, dfidx_full[:, :, mat+mat_num*(i-1)])
+        end
+    end
+
+    if use_proj
+        df0dx_full .= dρdx .* df0dx_full
+        dfidx_full .= dρdx .* dfidx_full
+    end
+    kkttol = 1e-6
+
+    kktnorm = kkttol + 100
+    outit = cur_it
+    exit_flag = false
+    exit_count=0
+    while true
+        outit = outit + 1
+
+        # The MMA subproblem is solved at the point xval:
+        if typeof(fi) !== Vector{Float64}
+            fi = [fi]
+        end
+        x_new, y, z, λ, ξ, η, μ, ζ, s, l, u = mmasub(n, m, opt_params, prob_type, f0, fi, vec(reshape(df0dx, :)), reshape(dfidx, :, m),
+            vec(x), vec(x_prev), vec(x_pprev), x_min, x_max, l, u, outit)
+        x_pprev .= x_prev
+        x_prev .= x
+        x .= x_new
+        # apply filter to updated
+        ρ_all .= apply_filter(filt, x_all)
+        # Heaviside filtration NOTE: not working
+        if use_proj
+            apply_projection!(β, ρ_all, dρdx)
+        end
+        MSIMP!(mmtop, E, dE, ρ_all)
+        region_update!(mmtop, ρ_all)
+        sol = solve(fea)
+
+        if targ == :Mass_min
+            f0_new = mass!(mmtop, df0dx, ρ, dens)
+            f0_prev = f0
+            f0 = f0_new
+        elseif targ == :Compl_min
+            f0_new = compliance!(mmtop, df0dx, sol, E, dE)
+            f0_prev = f0
+            f0 = f0_new
+        end
+
+        df0dx_full .= apply_filter(filt, df0dx_full)
+
+        for (i, constraint) in enumerate(constr)
+            for mat in 1:mat_num
+                if constraint == :Stress
+                    fi[mat+mat_num*(i-1)] = stress_constraint!(mmtop, mat, view(dfidx_full, :, :, mat + mat_num * (i - 1)), sol, dE, ρ_all, σ_max)
+                elseif constraint == :Volume
+                    fi[mat+mat_num*(i-1)] = volume_constraint!(mmtop, mat, view(dfidx_full, :, :, mat + mat_num * (i - 1)), ρ_all, V_lim)
+                end
+                dfidx_full[:, :, mat+mat_num*(i-1)] .= apply_filter(filt, dfidx_full[:, :, mat+mat_num*(i-1)])
+            end
+        end
+
+        if use_proj
+            df0dx_full .= dρdx .* df0dx_full
+            dfidx_full .= dρdx .* dfidx_full
+            if outit > 50 && β <= 5.0
+                β += 1.1^outit
+            end
+        end
+        # The residual vector of the KKT conditions is calculated:
+        # kktnorm, residumax = kktcheck(m, n, vec(x), y, z, λ, ξ, η, μ, ζ, s, x_min, x_max, fi, vec(reshape(df0dx, :)), reshape(dfidx, :, m), prob_type)
+        residu = abs(f0 - f0_prev) / f0_prev
+        print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, " residu: ", residu, "\n")
+
+        if residu < 1e-4
+            if exit_flag
+                exit_count += 1
+            else
+                exit_count = 0
+                exit_flag = true
+            end
+            if exit_count > 6
+                print("Objective function residual is less then 0.01% in 6 iterations")
+                break
+            end
+        elseif outit >= maxoutit
+            print("Finished, reached max iterations")
+            break
+        else
+            exit_flag = false
+        end
+        
+    end
+    return sol, ρ_all, outit
+end
 include("visualize.jl")
 include("parser.jl")
 

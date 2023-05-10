@@ -51,6 +51,10 @@ function parse_file(inp_file::String)
     sol = nothing
     mats = Material[]
     x = nothing
+    iter_num = 0
+    prob_type = nothing
+    constr = Symbol[]
+    init_val = 0.5
     for line in eachline(file)
         if line == ""
             break
@@ -110,13 +114,14 @@ function parse_file(inp_file::String)
             args = parse_line(line)
             val = parse_arg(args[1])
             filt = Filter(val, fea)
+        
         elseif line[1:3] == "MT:"
             args = parse_line(line)
             vals = parse_arg.(args)
             push!(mats, Material(vals...))
         elseif line[1:3] == "SR:"
             if mmtop === nothing
-                mmtop = MMTOProblem(fea, [mat.E for mat in mats], 3.0)
+                error("Problem not defined (PP should go before SR)")
             end
             args = parse_line(line)
             if args[1] == "P"
@@ -130,25 +135,37 @@ function parse_file(inp_file::String)
 
         elseif line[1:3] == "PP:"
             args = parse_line(line)
-            iter_num = parse_arg(args[1], Int64)
-            if args[2] == "COMPLIANCE"
-                type = :Compl_min
-            elseif args[2] == "MASS"
-                type = :Mass_min
+            init_val = parse_arg(args[1], Int64)
+            prob_q = parse_arg(args[2], Int64)
+            prob_s = parse_arg(args[3], Int64)
+            prob_p = parse_arg(args[4], Int64)
+            iter_num = parse_arg(args[5], Int64)
+            
+            if args[6] == "COMPLIANCE"
+                prob_type = :Compl_min
+            elseif args[6] == "MASS"
+                prob_type = :Mass_min
             end
-            constr = Symbol[]
-            for arg in args[3:end]
+            for arg in args[7:end]
                 if arg == "STRESS"
                     push!(constr, :Stress)
                 elseif arg == "VOLUME"
                     push!(constr, :Volume)
                 end
             end
-            sol, x = solve(mmtop, type, constr, filt, false, 0.5, [mat.V_lim for mat in mats],
-                [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
+            mmtop = MMTOProblem(fea, [mat.E for mat in mats], prob_q,prob_s,prob_p)
         elseif line[1:4] == "PLT:"
+            sol, x = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats],
+                [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
             args = parse_line(line)
-            for i in 1:2:length(args)
+            if isodd(length(args))
+                folder = parse_arg(args[1])
+                init_ind = 2
+            else
+                folder = ""
+                init_ind = 1
+            end
+            for i in init_ind:2:length(args)
                 name = parse_arg(args[i+1])
                 if args[i] == "DENS"
                     fig = display_solution(:Density, sol, mmtop, x, mat_names=vcat([mat.name for mat in mats], "Пустота"))
@@ -167,10 +184,10 @@ function parse_file(inp_file::String)
                 else 
                     error("Wrong plot type")
                 end
-                if !isdir("plots")
-                    mkdir("plots")
+                if !isdir(folder) && !(folder=="")
+                    mkdir(folder)
                 end
-                Mke.save(join(["./plots/",name,".png"]), fig)
+                Mke.save(join(["./",folder,"/",name,".png"]), fig)
             end
         else
             error(join(["Wrong input line:\n", line]))
@@ -178,5 +195,6 @@ function parse_file(inp_file::String)
     end
 
     close(file)
+    
     return fea, filt, mmtop, sol, x
 end

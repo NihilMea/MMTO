@@ -1,12 +1,11 @@
-
-
-
 function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x::Matrix{Float64}; mat_names::Vector{String}=String[], facets::Bool=false)
     if type == :Density
         val, w = calc_mat_type(mmtop, x)
         mat_num = length(mmtop.E0)
         mat = mat_num .- argmax.(eachrow(w))
-        fig = viz(mmtop.fea, mat, legend=true, legend_names=mat_names[end:-1:1], colornum=3, colormap=:RdPu_9, showfacets=facets)
+        # mat[w[:,1].<0.55 .&& w[:,2] .< 0.55] .= 0
+        cmap = ColorScheme([Colors.RGB(1.0, 1.0, 1.0),Colors.RGB(0.0, 0.0, 0.0)])
+        fig = viz(mmtop.fea, mat, legend=true, legend_names=mat_names[end:-1:1], colornum=3, colormap=cmap, showfacets=facets)
     elseif type == :X_Displ
         val, w = calc_mat_type(mmtop, x)
         fea = mmtop.fea
@@ -125,9 +124,15 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
     lims = extrema(filter(!isnan, to_plot), init=(-0.0001, 0.0001))
     colors = [val !== nothing ? get(colmap, (val - lims[1]) / (lims[2] - lims[1])) : val for val in to_plot]
     fig = Mke.Figure()
-    ax, plt = Mke.mesh(fig[1, 1], vertices, faces, color=colors, colorrange=lims, colormap=colmap, shading=false, nan_color=:white)
+    ax, msh = Mke.mesh(fig[1, 1], vertices, faces, color=colors, colorrange=lims, colormap=colmap, shading=false, nan_color=:white)
+    dx = maximum(vertices[:, 1]) - minimum(vertices[:, 1])
+    dy = maximum(vertices[:, 2]) - minimum(vertices[:, 2])
+    ax.aspect = Mke.AxisAspect(dx / dy)
     if legend
-        leg_colors = [get(colmap, (val - lims[1]) / (lims[2] - lims[1])) for val in sort(filter(x -> !isnothing(x), unique(to_plot)))]
+        mats = 1:length(legend_names)
+        b = (lims[2]-lims[1])/(mats[end]-mats[1])
+        k = lims[1] - b*mats[1]
+        leg_colors = [get(colmap,(round(Int,b*val+k)-lims[1])/(lims[2]-lims[1])) for val in mats]
         elems = [Mke.PolyElement(color=color, strokecolor=:transparent) for color in leg_colors]
         Mke.Legend(fig[1, 2], elems, legend_names)
     end
