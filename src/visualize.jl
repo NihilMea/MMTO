@@ -4,7 +4,7 @@ function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x:
         mat_num = length(mmtop.E0)
         mat = mat_num .- argmax.(eachrow(w))
         # mat[w[:,1].<0.55 .&& w[:,2] .< 0.55] .= 0
-        cmap = ColorScheme([Colors.RGB(1.0, 1.0, 1.0),Colors.RGB(0.0, 0.0, 0.0)])
+        cmap = ColorScheme([Colors.RGB(1.0, 1.0, 1.0), Colors.RGB(0.0, 0.0, 0.0)])
         fig = viz(mmtop.fea, mat, legend=true, legend_names=mat_names[end:-1:1], colornum=3, colormap=cmap, showfacets=facets)
     elseif type == :X_Displ
         val, w = calc_mat_type(mmtop, x)
@@ -123,18 +123,28 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
     end
     lims = extrema(filter(!isnan, to_plot), init=(-0.0001, 0.0001))
     colors = [val !== nothing ? get(colmap, (val - lims[1]) / (lims[2] - lims[1])) : val for val in to_plot]
-    fig = Mke.Figure()
-    ax, msh = Mke.mesh(fig[1, 1], vertices, faces, color=colors, colorrange=lims, colormap=colmap, shading=false, nan_color=:white)
     dx = maximum(vertices[:, 1]) - minimum(vertices[:, 1])
     dy = maximum(vertices[:, 2]) - minimum(vertices[:, 2])
+    if dx / dy > 1.0
+        res = (1280,1280*(dy+16)/dx)
+    else
+        res = (1280*(dx+16)/dy,1280)
+    end
+    fig = Mke.Figure(resolution = res)
+    ax, msh = Mke.mesh(fig[1, 1], vertices, faces, color=colors, colorrange=lims, colormap=colmap, shading=false, nan_color=:white)
     ax.aspect = Mke.AxisAspect(dx / dy)
     if legend
         mats = 1:length(legend_names)
-        b = (lims[2]-lims[1])/(mats[end]-mats[1])
-        k = lims[1] - b*mats[1]
-        leg_colors = [get(colmap,(round(Int,b*val+k)-lims[1])/(lims[2]-lims[1])) for val in mats]
+        b = (lims[2] - lims[1]) / (mats[end] - mats[1])
+        k = lims[1] - b * mats[1]
+        leg_colors = [get(colmap, (round(Int, b * val + k) - lims[1]) / (lims[2] - lims[1])) for val in mats]
         elems = [Mke.PolyElement(color=color, strokecolor=:transparent) for color in leg_colors]
-        Mke.Legend(fig[1, 2], elems, legend_names)
+        if dx / dy > 1.0
+            Mke.Legend(fig[2, 1], elems, legend_names,orientation = :horizontal, tellwidth = false, tellheight = true)
+        else
+            Mke.Legend(fig[1, 2], elems, legend_names)
+        end
+
     end
     if showfacets
         xs = zeros(8 * nel)
@@ -165,7 +175,12 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
         Mke.linesegments!(ax, xs, ys, color=:black, linewidth=0.5)
     end
     if colorbar
-        Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name)
+        if dx / dy > 1.0
+            Mke.Colorbar(fig[2, 1], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name,vertical = false,flipaxis = false,alignmode=Mke.Outside(20))
+        else
+            Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name,alignmode=Mke.Outside(20))
+        end
     end
+    Mke.resize_to_layout!(fig)
     return fig
 end

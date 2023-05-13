@@ -4,7 +4,7 @@ using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes, Colors
 import GLMakie as Mke
 
 
-export Point2D, FEAProblem, calc_stress, update_E!, set_bc!, solve, solve!, elem_dofs
+export Point2D, FEAProblem, calc_stress, set_E!, set_bc!, solve, solve!, elem_dofs
 export stress_constraint!, region_update!, MSIMP!
 export Filter, apply_filter
 export MMTOProblem, set_region!, calc_mat_type
@@ -463,8 +463,8 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
                 exit_count = 0
                 exit_flag = true
             end
-            if exit_count > 6
-                print("Objective function residual is less then 0.01% in 6 iterations")
+            if exit_count > 12
+                print("Objective function residual is less then 0.01% for 12 iterations")
                 break
             end
         elseif outit >= maxoutit

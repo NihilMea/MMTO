@@ -71,6 +71,7 @@ function solve_subproblem(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}
     beta::Vector{Float64}, p0::Vector{Float64}, q0::Vector{Float64}, p::Matrix{Float64}, q::Matrix{Float64},
     b::Vector{Float64}, opt_params::OptimizerParameters, pr_type::MMAProblemType)
     ε = 1.0
+
     x = 0.5 * (alpha + beta)
     y = ones(m)
     z = 1.0
@@ -89,7 +90,7 @@ function solve_subproblem(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}
             iter += 1
             dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds, res_w_old_norm = find_newton_step(ε, x, y, z, λ, ξ,
                 η, μ, ζ, s, n, m, l, u, alpha, beta, p0, q0, p, q, b, pr_type)
-            x, y, z, λ, ξ, η, μ, ζ, s, res_w_inf_norm, res_w_norm = calc_next_step(l, u, alpha, beta, p0, q0, p, q, b, pr_type, res_w_old_norm, ε,
+            x, y, z, λ, ξ, η, μ, ζ, s, res_w_inf_norm, res_w_norm = calc_next_step(n,m,l, u, alpha, beta, p0, q0, p, q, b, pr_type, res_w_old_norm, ε,
                 x, y, z, λ, ξ, η, μ, ζ, s,
                 dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds)
 
@@ -102,12 +103,33 @@ function solve_subproblem(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}
     return x, y, z, λ, ξ, η, μ, ζ, s
 end
 
-function find_newton_step(ε::Float64, x::Vector{Float64}, y::Vector{Float64},
+function find_newton_step(ε::Float64, x::Array{Float64}, y::Vector{Float64},
     z::Float64, λ::Vector{Float64}, ξ::Vector{Float64},
     η::Vector{Float64}, μ::Vector{Float64}, ζ::Float64, s::Vector{Float64},
     n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
     beta::Vector{Float64}, p0::Vector{Float64}, q0::Vector{Float64}, p::Matrix{Float64}, q::Matrix{Float64},
     b::Vector{Float64}, pr_type::MMAProblemType)
+    residu = zeros(n + m + 1 + m + n + n + m + 1 + m)
+    x_ind = 1:n
+    y_ind =(n).+(1:m)
+    z_ind =(n+m).+(1:1)
+    λ_ind =(n+m+1).+(1:m)
+    ξ_ind =(n+m+1+m).+(1:n)
+    η_ind =(n+m+1+m+n).+(1:n)
+    μ_ind =(n+m+1+m+2n).+(1:m)
+    ζ_ind =(n+m+1+m+2n+m).+(1:1)
+    s_ind =(n+m+1+m+2n+m+1).+(1:m)
+
+    r_x = @view residu[x_ind]
+    r_y = @view residu[y_ind]
+    r_z = @view residu[z_ind]
+    r_λ = @view residu[λ_ind]
+    r_ξ = @view residu[ξ_ind]
+    r_η = @view residu[η_ind]
+    r_μ = @view residu[μ_ind]
+    r_ζ = @view residu[ζ_ind]
+    r_s = @view residu[s_ind]
+
     # finding newton step
     xa = x - alpha
     bx = beta - x
@@ -175,24 +197,47 @@ function find_newton_step(ε::Float64, x::Vector{Float64}, y::Vector{Float64},
     dμ = -μ .* dy ./ y - μ + ε ./ y
     dζ = -ζ / z * dz - ζ + ε / z
     ds = -s .* dλ ./ λ - s + ε ./ λ
-    r_x = dpsi - ξ + η
-    r_y = pr_type.ci + pr_type.di .* y - λ - μ
-    r_z = pr_type.a0 - ζ - transpose(λ) * pr_type.ai
-    r_λ = g - pr_type.ai .* z - y + s - b
-    r_ξ = ξ .* xa .- ε
-    r_η = η .* bx .- ε
-    r_μ = μ .* y .- ε
-    r_ζ = ζ * z .- ε
-    r_s = λ .* s .- ε
-    res_w_norm = norm([r_x; r_y; r_z; r_λ; r_ξ; r_η; r_μ; r_ζ; r_s])
+    r_x .= dpsi - ξ + η
+    r_y .= pr_type.ci + pr_type.di .* y - λ - μ
+    r_z .= pr_type.a0 - ζ - transpose(λ) * pr_type.ai
+    r_λ .= g - pr_type.ai .* z - y + s - b
+    r_ξ .= ξ .* xa .- ε
+    r_η .= η .* bx .- ε
+    r_μ .= μ .* y .- ε
+    r_ζ .= ζ * z .- ε
+    r_s .= λ .* s .- ε
+    res_w_norm = norm(residu)
     return dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds, res_w_norm
 end
 
-function calc_next_step(l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
+function calc_next_step(n::Int,m::Int,l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
     beta::Vector{Float64}, p0::Vector{Float64}, q0::Vector{Float64}, p::Matrix{Float64}, q::Matrix{Float64},
     b::Vector{Float64}, pr_type::MMAProblemType, res_w_old_norm::Float64, ε::Float64,
     x::Vector{Float64}, y::Vector{Float64}, z::Float64, λ::Vector{Float64}, ξ::Vector{Float64}, η::Vector{Float64}, μ::Vector{Float64}, ζ::Float64, s::Vector{Float64},
     dx::Vector{Float64}, dy::Vector{Float64}, dz::Float64, dλ::Vector{Float64}, dξ::Vector{Float64}, dη::Vector{Float64}, dμ::Vector{Float64}, dζ::Float64, ds::Vector{Float64})
+
+    res_w = zeros(n + m + 1 + m + n + n + m + 1 + m)
+    x_ind = 1:n
+    y_ind =(n).+(1:m)
+    z_ind =(n+m).+(1:1)
+    λ_ind =(n+m+1).+(1:m)
+    ξ_ind =(n+m+1+m).+(1:n)
+    η_ind =(n+m+1+m+n).+(1:n)
+    μ_ind =(n+m+1+m+2n).+(1:m)
+    ζ_ind =(n+m+1+m+2n+m).+(1:1)
+    s_ind =(n+m+1+m+2n+m+1).+(1:m)
+
+    r_x = @view res_w[x_ind]
+    r_y = @view res_w[y_ind]
+    r_z = @view res_w[z_ind]
+    r_λ = @view res_w[λ_ind]
+    r_ξ = @view res_w[ξ_ind]
+    r_η = @view res_w[η_ind]
+    r_μ = @view res_w[μ_ind]
+    r_ζ = @view res_w[ζ_ind]
+    r_s = @view res_w[s_ind]
+
+
     t_x = maximum(-1.01 * [dy; dz; dλ; dξ; dη; dμ; dζ; ds] ./ [y; z; λ; ξ; η; μ; ζ; s])
     t_a = maximum(-1.01 * dx ./ (x - alpha))
     t_b = maximum(1.01 * dx ./ (beta - x))
@@ -208,7 +253,7 @@ function calc_next_step(l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Fl
     sold = s
     iter = 0
     res_w_norm = 2.0 * res_w_old_norm
-    res_w = zeros(length([x; y; z; λ; ξ; η; μ; ζ; s]))
+    res_w = zeros(length(res_w))
     while res_w_norm > res_w_old_norm && iter < 100
         iter = iter + 1
         x = xold + t * dx
@@ -229,16 +274,15 @@ function calc_next_step(l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Fl
         plam = p0 + transpose(p) * λ
         qlam = q0 + transpose(q) * λ
         dpsi = plam .* (uxinv .* uxinv) - qlam .* (xlinv .* xlinv)
-        r_x = dpsi - ξ + η
-        r_y = pr_type.ci + pr_type.di .* y - λ - μ
-        r_z = pr_type.a0 - ζ - transpose(λ) * pr_type.ai
-        r_λ = g - pr_type.ai .* z - y + s - b
-        r_ξ = ξ .* xa .- ε
-        r_η = η .* bx .- ε
-        r_μ = μ .* y .- ε
-        r_ζ = ζ * z .- ε
-        r_s = λ .* s .- ε
-        res_w = [r_x; r_y; r_z; r_λ; r_ξ; r_η; r_μ; r_ζ; r_s]
+        r_x .= dpsi - ξ + η
+        r_y .= pr_type.ci + pr_type.di .* y - λ - μ
+        r_z .= pr_type.a0 - ζ - transpose(λ) * pr_type.ai
+        r_λ .= g - pr_type.ai .* z - y + s - b
+        r_ξ .= ξ .* xa .- ε
+        r_η .= η .* bx .- ε
+        r_μ .= μ .* y .- ε
+        r_ζ .= ζ * z .- ε
+        r_s .= λ .* s .- ε
         res_w_norm = norm(res_w)
         t = t / 2.0
     end

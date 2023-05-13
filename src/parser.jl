@@ -1,7 +1,7 @@
 function parse_arg(s::AbstractString, type::Type=Float64)
     if contains("\"", s)
         type = String
-        ret = strip(s,['\"',' '])
+        ret = strip(s, ['\"', ' '])
         return ret
     end
     val = tryparse(type, s)
@@ -114,7 +114,7 @@ function parse_file(inp_file::String)
             args = parse_line(line)
             val = parse_arg(args[1])
             filt = Filter(val, fea)
-        
+
         elseif line[1:3] == "MT:"
             args = parse_line(line)
             vals = parse_arg.(args)
@@ -140,7 +140,7 @@ function parse_file(inp_file::String)
             prob_s = parse_arg(args[3], Int64)
             prob_p = parse_arg(args[4], Int64)
             iter_num = parse_arg(args[5], Int64)
-            
+
             if args[6] == "COMPLIANCE"
                 prob_type = :Compl_min
             elseif args[6] == "MASS"
@@ -153,10 +153,9 @@ function parse_file(inp_file::String)
                     push!(constr, :Volume)
                 end
             end
-            mmtop = MMTOProblem(fea, [mat.E for mat in mats], prob_q,prob_s,prob_p)
+            mmtop = MMTOProblem(fea, [mat.E for mat in mats], prob_q, prob_s, prob_p)
         elseif line[1:4] == "PLT:"
-            sol, x = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats],
-                [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
+            sol, x = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats], [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
             args = parse_line(line)
             if isodd(length(args))
                 folder = parse_arg(args[1])
@@ -181,13 +180,13 @@ function parse_file(inp_file::String)
                     fig = display_solution(:Y_Displ, sol, mmtop, x)
                 elseif args[i] == "DISPL_X"
                     fig = display_solution(:X_Displ, sol, mmtop, x)
-                else 
+                else
                     error("Wrong plot type")
                 end
-                if !isdir(folder) && !(folder=="")
+                if !isdir(folder) && !(folder == "")
                     mkdir(folder)
                 end
-                Mke.save(join(["./",folder,"/",name,".png"]), fig)
+                Mke.save(join(["./", folder, "/", name, ".png"]), fig)
             end
         else
             error(join(["Wrong input line:\n", line]))
@@ -195,6 +194,6 @@ function parse_file(inp_file::String)
     end
 
     close(file)
-    
+
     return fea, filt, mmtop, sol, x
 end
