@@ -253,7 +253,7 @@ function calc_next_step(n::Int,m::Int,l::Vector{Float64}, u::Vector{Float64}, al
     sold = s
     iter = 0
     res_w_norm = 2.0 * res_w_old_norm
-    res_w = zeros(length(res_w))
+    # res_w = zeros(length(res_w))
     while res_w_norm > res_w_old_norm && iter < 100
         iter = iter + 1
         x = xold + t * dx
