@@ -15,14 +15,59 @@ end
     raa0::Float64 = 1e-5
     albefa::Float64 = 0.1
     move::Float64 = 0.05
-    asyinit::Float64 = 0.4
+    asyinit::Float64 = 0.45
     asydecr::Float64 = 0.7
-    asyincr::Float64 = 1.1
+    asyincr::Float64 = 1.2
     res_tol::Float64 = 0.0 # residual tolerance
     epsilon_min::Float64 = 1e-7
 end
 
 function mmasub(n::Int, m::Int, opt_params::OptimizerParameters, pr_type::MMAProblemType, f0::Float64, fi::Vector{Float64}, df0dx::AbstractArray{Float64}, dfidx::AbstractArray{Float64}, x::AbstractArray{Float64}, x_prev::AbstractArray{Float64}, x_pprev::AbstractArray{Float64},
+    x_min::Vector{Float64}, x_max::Vector{Float64}, l::Vector{Float64}, u::Vector{Float64}, k::Int)
+    dfidx = transpose(dfidx)
+    x_max_min = x_max - x_min
+    if k < 3
+        l = x - opt_params.asyinit * x_max_min
+        u = x + opt_params.asyinit * x_max_min
+    else
+        γ = Vector{Float64}(undef, length(x))
+        for i in 1:length(γ)
+            ddx = (x[i] - x_prev[i]) .* (x_prev[i] - x_pprev[i])
+            if ddx < 0
+                γ[i] = opt_params.asydecr
+            elseif ddx > 0
+                γ[i] = opt_params.asyincr
+            else
+                γ[i] = 1.0
+            end
+        end
+        l = x - γ .* (x_prev - l)
+        u = x + γ .* (u - x_prev)
+        l = min.(l, x - 0.01 .* x_max_min)
+        l = max.(l, x - 10.0 .* x_max_min)
+        u = max.(u, x + 0.01 .* x_max_min)
+        u = min.(u, x + 10.0 .* x_max_min)
+    end
+    # Calculation of the bounds alfa and beta :
+    ux = u - x
+    xl = x - l
+    α = max.(x_min, l + opt_params.albefa * xl, x - opt_params.move * x_max_min)
+    β = min.(x_max, u - opt_params.albefa * ux, x + opt_params.move * x_max_min)
+    # Calculations of p0, q0, P, Q and b :
+    df0_pls = max.(df0dx, 0)
+    df0_min = max.(-df0dx, 0)
+    dfi_pls = max.(dfidx, 0)
+    dfi_min = max.(-dfidx, 0)
+    p0 = ux .^ 2 .* (1.001 * df0_pls + 0.001 * df0_min + opt_params.raa0 ./ x_max_min)
+    q0 = xl .^ 2 .* (0.001 * df0_pls + 1.001 * df0_min + opt_params.raa0 ./ x_max_min)
+    p = transpose(ux) .^ 2 .* (1.001 * dfi_pls + 0.001 * dfi_min .+ transpose(opt_params.raa0 ./ x_max_min))
+    q = transpose(xl) .^ 2 .* (0.001 * dfi_pls + 1.001 * dfi_min .+ transpose(opt_params.raa0 ./ x_max_min))
+    b = vec(sum(p ./ transpose(ux) + q ./ transpose(xl), dims=2)) - fi
+    x, y, z, λ, ξ, η, μ, ζ, s = solve_subproblem(n, m, l, u, α, β, p0, q0, p, q, b, opt_params, pr_type)
+    return x, y, z, λ, ξ, η, μ, ζ, s, l, u
+end
+
+function gcmmasub(n::Int, m::Int, opt_params::OptimizerParameters, pr_type::MMAProblemType, f0::Float64, fi::Vector{Float64}, df0dx::AbstractArray{Float64}, dfidx::AbstractArray{Float64}, x::AbstractArray{Float64}, x_prev::AbstractArray{Float64}, x_pprev::AbstractArray{Float64},
     x_min::Vector{Float64}, x_max::Vector{Float64}, l::Vector{Float64}, u::Vector{Float64}, k::Int)
     dfidx = transpose(dfidx)
     x_max_min = x_max - x_min
@@ -88,9 +133,9 @@ function solve_subproblem(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}
         iter = 1
         while true
             iter += 1
-            dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds, res_w_old_norm = find_newton_step(ε, x, y, z, λ, ξ,
-                η, μ, ζ, s, n, m, l, u, alpha, beta, p0, q0, p, q, b, pr_type)
-            x, y, z, λ, ξ, η, μ, ζ, s, res_w_inf_norm, res_w_norm = calc_next_step(n,m,l, u, alpha, beta, p0, q0, p, q, b, pr_type, res_w_old_norm, ε,
+            dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds, res_w_old_norm = find_newton_step(n, m, ε, x, y, z, λ, ξ,
+                η, μ, ζ, s, l, u, alpha, beta, p0, q0, p, q, b, pr_type)
+            x, y, z, λ, ξ, η, μ, ζ, s, res_w_inf_norm, res_w_norm = calc_next_step(n, m, l, u, alpha, beta, p0, q0, p, q, b, pr_type, res_w_old_norm, ε,
                 x, y, z, λ, ξ, η, μ, ζ, s,
                 dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds)
 
@@ -103,22 +148,22 @@ function solve_subproblem(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}
     return x, y, z, λ, ξ, η, μ, ζ, s
 end
 
-function find_newton_step(ε::Float64, x::Array{Float64}, y::Vector{Float64},
+function find_newton_step(n::Int, m::Int, ε::Float64, x::Array{Float64}, y::Vector{Float64},
     z::Float64, λ::Vector{Float64}, ξ::Vector{Float64},
     η::Vector{Float64}, μ::Vector{Float64}, ζ::Float64, s::Vector{Float64},
-    n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
+    l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
     beta::Vector{Float64}, p0::Vector{Float64}, q0::Vector{Float64}, p::Matrix{Float64}, q::Matrix{Float64},
     b::Vector{Float64}, pr_type::MMAProblemType)
     residu = zeros(n + m + 1 + m + n + n + m + 1 + m)
     x_ind = 1:n
-    y_ind =(n).+(1:m)
-    z_ind =(n+m).+(1:1)
-    λ_ind =(n+m+1).+(1:m)
-    ξ_ind =(n+m+1+m).+(1:n)
-    η_ind =(n+m+1+m+n).+(1:n)
-    μ_ind =(n+m+1+m+2n).+(1:m)
-    ζ_ind =(n+m+1+m+2n+m).+(1:1)
-    s_ind =(n+m+1+m+2n+m+1).+(1:m)
+    y_ind = (n) .+ (1:m)
+    z_ind = (n + m) .+ (1:1)
+    λ_ind = (n + m + 1) .+ (1:m)
+    ξ_ind = (n + m + 1 + m) .+ (1:n)
+    η_ind = (n + m + 1 + m + n) .+ (1:n)
+    μ_ind = (n + m + 1 + m + 2n) .+ (1:m)
+    ζ_ind = (n + m + 1 + m + 2n + m) .+ (1:1)
+    s_ind = (n + m + 1 + m + 2n + m + 1) .+ (1:m)
 
     r_x = @view residu[x_ind]
     r_y = @view residu[y_ind]
@@ -210,7 +255,7 @@ function find_newton_step(ε::Float64, x::Array{Float64}, y::Vector{Float64},
     return dx, dy, dz, dλ, dξ, dη, dμ, dζ, ds, res_w_norm
 end
 
-function calc_next_step(n::Int,m::Int,l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
+function calc_next_step(n::Int, m::Int, l::Vector{Float64}, u::Vector{Float64}, alpha::Vector{Float64},
     beta::Vector{Float64}, p0::Vector{Float64}, q0::Vector{Float64}, p::Matrix{Float64}, q::Matrix{Float64},
     b::Vector{Float64}, pr_type::MMAProblemType, res_w_old_norm::Float64, ε::Float64,
     x::Vector{Float64}, y::Vector{Float64}, z::Float64, λ::Vector{Float64}, ξ::Vector{Float64}, η::Vector{Float64}, μ::Vector{Float64}, ζ::Float64, s::Vector{Float64},
@@ -218,14 +263,14 @@ function calc_next_step(n::Int,m::Int,l::Vector{Float64}, u::Vector{Float64}, al
 
     res_w = zeros(n + m + 1 + m + n + n + m + 1 + m)
     x_ind = 1:n
-    y_ind =(n).+(1:m)
-    z_ind =(n+m).+(1:1)
-    λ_ind =(n+m+1).+(1:m)
-    ξ_ind =(n+m+1+m).+(1:n)
-    η_ind =(n+m+1+m+n).+(1:n)
-    μ_ind =(n+m+1+m+2n).+(1:m)
-    ζ_ind =(n+m+1+m+2n+m).+(1:1)
-    s_ind =(n+m+1+m+2n+m+1).+(1:m)
+    y_ind = (n) .+ (1:m)
+    z_ind = (n + m) .+ (1:1)
+    λ_ind = (n + m + 1) .+ (1:m)
+    ξ_ind = (n + m + 1 + m) .+ (1:n)
+    η_ind = (n + m + 1 + m + n) .+ (1:n)
+    μ_ind = (n + m + 1 + m + 2n) .+ (1:m)
+    ζ_ind = (n + m + 1 + m + 2n + m) .+ (1:1)
+    s_ind = (n + m + 1 + m + 2n + m + 1) .+ (1:m)
 
     r_x = @view res_w[x_ind]
     r_y = @view res_w[y_ind]

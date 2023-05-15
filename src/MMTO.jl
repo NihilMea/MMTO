@@ -1,6 +1,6 @@
 module MMTO
 
-using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes, Colors
+using SparseArrays, StaticArrays, LinearAlgebra, ColorSchemes, Colors, JLD2
 import GLMakie as Mke
 
 
@@ -73,12 +73,12 @@ function region_update!(mmtop::MMTOProblem, x::Matrix{Float64})
 
 end
 
-function SIMP!(mmtop::MMTOProblem, E::AbstractVector{Float64}, dE::Vector{Float64}, x::AbstractVector{Float64})
+function SIMP!(mmtop::MMTOProblem, E::SubArray{Float64}, dE::Vector{Float64}, x::SubArray{Float64})
     E .= x .^ mmtop.p .* mmtop.E0[1]
     dE .= mmtop.p .* x .^ (mmtop.p - 1) .* mmtop.E0[1]
 end
 
-function MSIMP!(mmtop::MMTOProblem, E::Vector{Float64}, dE::Matrix{Float64}, x::AbstractMatrix{Float64})
+function MSIMP!(mmtop::MMTOProblem, E::Vector{Float64}, dE::Matrix{Float64}, x::Matrix{Float64})
     q = mmtop.q
     E0 = mmtop.E0
     M = length(E0)
@@ -102,7 +102,7 @@ function MSIMP!(mmtop::MMTOProblem, E::Vector{Float64}, dE::Matrix{Float64}, x::
 
 end
 
-function calc_mat_type(mmtop::MMTOProblem, x::AbstractMatrix{Float64})
+function calc_mat_type(mmtop::MMTOProblem, x::Matrix{Float64})
     E0 = mmtop.E0
     M = length(E0)
     w = zeros(size(x, 1), M)
@@ -117,7 +117,7 @@ function calc_mat_type(mmtop::MMTOProblem, x::AbstractMatrix{Float64})
 end
 
 #TODO update for MSIMP
-function compliance!(mmtop::MMTOProblem, df0dx::AbstractMatrix{Float64}, sol::FEASolution, E::AbstractVector{Float64}, dE::Matrix{Float64})
+function compliance!(mmtop::MMTOProblem, df0dx::SubArray{Float64}, sol::FEASolution, E::Vector{Float64}, dE::Matrix{Float64})
     # df0dx = zeros(length(findall(mmtop.active_elements)))
     Ke0 = mmtop.fea.Ke0
     f0 = 0.0
@@ -134,7 +134,7 @@ function compliance!(mmtop::MMTOProblem, df0dx::AbstractMatrix{Float64}, sol::FE
     return f0 / f
 end
 
-function mass!(mmtop::MMTOProblem, df0dx::AbstractMatrix{Float64}, x::AbstractMatrix{Float64}, dens::Vector{Float64})
+function mass!(mmtop::MMTOProblem, df0dx::SubArray{Float64}, x::SubArray{Float64}, dens::Vector{Float64})
     q = 1
     M = length(dens)
     w = zeros(size(x, 1), M)
@@ -160,7 +160,7 @@ function mass!(mmtop::MMTOProblem, df0dx::AbstractMatrix{Float64}, x::AbstractMa
     return f0
 end
 
-function volume_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{Float64}, x::AbstractMatrix{Float64}, V_lim::Vector{Float64})
+function volume_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::SubArray{Float64}, x::Matrix{Float64}, V_lim::Vector{Float64})
     q = 1
     M = length(V_lim) + 1
     w = zeros(size(x, 1))
@@ -184,11 +184,11 @@ function volume_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{
     return fi
 end
 
-function stress_constraint!(mmtop::MMTOProblem, dfidx::AbstractMatrix{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::AbstractMatrix{Float64}, σ_max::Vector{Float64})
+function stress_constraint!(mmtop::MMTOProblem, dfidx::SubArray{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::SubArray{Float64}, σ_max::Vector{Float64})
     return stress_constraint!(mmtop, 1, dfidx, sol, dE, x, σ_max)
 end
 
-function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::AbstractMatrix{Float64}, σ_max::Vector{Float64})
+function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::SubArray{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::Matrix{Float64}, σ_max::Vector{Float64})
     T = [1.0 -0.5 0.0
         -0.5 1.0 0.0
         0.0 0.0 3.0]
@@ -260,7 +260,54 @@ function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{
     return fi
 end
 
-# function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::AbstractMatrix{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::AbstractMatrix{Float64}, σ_max::Vector{Float64})
+function calc_stress(mmtop::MMTOProblem, sol::FEASolution, x::Matrix{Float64}, σ_max::Vector{Float64}, type::Symbol)
+
+    T = [1.0 -0.5 0.0
+        -0.5 1.0 0.0
+        0.0 0.0 3.0]
+    s = mmtop.s
+    B = mmtop.fea.Bσ
+    D0 = mmtop.fea.D0
+    N = mmtop.fea.num_el
+    act_elems = 1:N
+
+    M = length(σ_max) + 1
+    w = zeros(N, M)
+    for mat in 1:M
+        if mat == 1
+            w[:, mat] = prod(x[:, 1:(M-1)] .^ s, dims=2)
+        else
+            w[:, mat] = (1 .- x[:, M-mat+1]) .^ s .* prod(x[:, 1:(M-mat)] .^ s, dims=2)
+        end
+    end
+
+    _, w_mat = calc_mat_type(mmtop, x)
+    σ_pen = zeros(N, 3)
+    mats = argmax.(eachrow(w_mat))
+
+    for (i, el_id) in enumerate(act_elems)
+        el_dofs = elem_dofs(mmtop.fea, el_id)
+        σ = D0 * B * sol.U[el_dofs]
+        σ_pen[i, :] = (w[el_id, mats[i]] * mmtop.E0[mats[i]] ).* σ
+    end
+
+    if type == :x
+        σ = σ_pen[:, 1]
+    elseif type == :y
+        σ = σ_pen[:, 2]
+    elseif type == :xy
+        σ = σ_pen[:, 3]
+    elseif type == :vM # von-Mises stress
+        σ = [sqrt(transpose(s) * T * s) for s in eachrow(σ_pen)]
+    elseif type == :MS # margin of safety
+        σ = [sqrt(transpose(s) * T * s) for s in eachrow(σ_pen)] ./ [mat == M ? 1e-3 : σ_max[mat] for mat in mats]
+    else
+        error("Wrong output type provided")
+    end
+    return σ
+end
+
+# function stress_constraint!(mmtop::MMTOProblem, mat::Int, dfidx::SubArray{Float64}, sol::FEASolution, dE::Matrix{Float64}, x::SubArray{Float64}, σ_max::Vector{Float64})
 #     T = [1.0 -0.5 0.0
 #         -0.5 1.0 0.0
 #         0.0 0.0 3.0]
@@ -325,10 +372,10 @@ end
 #     return fi
 # end
 
-function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x_init::Float64, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int)
+function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x_init::Union{Float64,Vector{Float64}}, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int)
     dens = vcat(dens, 1e-12)
     mat_num = length(mmtop.E0) - 1 # number of materials (void not included)
-    n = length(findall(mmtop.active_elements))
+    n = length(findall(mmtop.active_elements)) * mat_num
     if typeof(constr) == Symbol
         constr = [constr]
     end
@@ -337,11 +384,22 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
     prob_type = MMAProblemType(1.0, zeros(m), ones(m), fill(1e3, m))
     fea = mmtop.fea
 
-    x_min = fill(1e-3, n * mat_num)
-    x_max = fill(1.0, n * mat_num)
+    x_min = fill(1e-3, n)
+    x_max = fill(1.0, n)
     l = copy(x_min)
     u = copy(x_max)
-    x_all = fill(x_init, fea.num_el, mat_num)
+    if typeof(x_init) == Float64
+        if mat_num - 1 != 0
+            x_all = repeat(hcat(x_init, zeros(mat_num - 1)), fea.num_el)
+        else
+            x_all = fill(x_init, fea.num_el, mat_num)
+        end
+    else
+        if length(x_init) != mat_num
+            error("Wrong number of initial values for design variables")
+        end
+        x_all = repeat(transpose(x_init), fea.num_el)
+    end
     x_all[mmtop.passive_elements, :] .= 1e-3
     x_all[mmtop.fixed_elements, :] .= 1.0
 
@@ -393,12 +451,10 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
         df0dx_full .= dρdx .* df0dx_full
         dfidx_full .= dρdx .* dfidx_full
     end
-    kkttol = 1e-9
 
-    kktnorm = kkttol + 100
     outit = 0
     exit_flag = false
-    exit_count=0
+    exit_count = 0
     while true
         outit = outit + 1
 
@@ -453,34 +509,34 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
         end
         # The residual vector of the KKT conditions is calculated:
         # kktnorm, residumax = kktcheck(m, n, vec(x), y, z, λ, ξ, η, μ, ζ, s, x_min, x_max, fi, vec(reshape(df0dx, :)), reshape(dfidx, :, m), prob_type)
-        residu = abs(f0- f0_prev) / f0_prev
+        residu = abs(f0 - f0_prev) / f0_prev
         print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, " residu: ", residu, "\n")
 
-        if residu < 1e-4
+        if outit >= maxoutit
+            print("Finished, reached max iterations")
+            break
+        elseif residu < 1e-4
             if exit_flag
                 exit_count += 1
             else
                 exit_count = 0
                 exit_flag = true
             end
-            if exit_count > 12
-                print("Objective function residual is less then 0.01% for 12 iterations")
+            if exit_count > 20
+                print("Objective function residual is less then 0.01% in 20 iterations")
                 break
             end
-        elseif outit >= maxoutit
-            print("Finished, reached max iterations")
-            break
         else
             exit_flag = false
         end
     end
-    return sol, ρ_all, outit
+    return sol, ρ_all, f0, outit
 end
 
 function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x::Matrix{Float64}, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int, cur_it::Int)
     dens = vcat(dens, 1e-12)
     mat_num = length(mmtop.E0) - 1 # number of materials (void not included)
-    n = length(findall(mmtop.active_elements))
+    n = length(findall(mmtop.active_elements)) * mat_num
     if typeof(constr) == Symbol
         constr = [constr]
     end
@@ -489,8 +545,8 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
     prob_type = MMAProblemType(1.0, zeros(m), ones(m), fill(1e3, m))
     fea = mmtop.fea
 
-    x_min = fill(1e-3, n * mat_num)
-    x_max = fill(1.0, n * mat_num)
+    x_min = fill(1e-3, n)
+    x_max = fill(1.0, n)
     l = copy(x_min)
     u = copy(x_max)
     x_all = x
@@ -550,7 +606,7 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
     kktnorm = kkttol + 100
     outit = cur_it
     exit_flag = false
-    exit_count=0
+    exit_count = 0
     while true
         outit = outit + 1
 
@@ -608,26 +664,26 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
         residu = abs(f0 - f0_prev) / f0_prev
         print("Iter: ", outit, " Targ. func: ", f0, " constr: ", fi, " residu: ", residu, "\n")
 
-        if residu < 1e-4
+        if outit >= maxoutit
+            print("Finished, reached max iterations")
+            break
+        elseif residu < 1e-4
             if exit_flag
                 exit_count += 1
             else
                 exit_count = 0
                 exit_flag = true
             end
-            if exit_count > 6
-                print("Objective function residual is less then 0.01% in 6 iterations")
+            if exit_count > 20
+                print("Objective function residual is less then 0.01% in 20 iterations")
                 break
             end
-        elseif outit >= maxoutit
-            print("Finished, reached max iterations")
-            break
         else
             exit_flag = false
         end
-        
+
     end
-    return sol, ρ_all, outit
+    return sol, ρ_all, f0, outit
 end
 include("visualize.jl")
 include("parser.jl")

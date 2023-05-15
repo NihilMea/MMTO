@@ -1,8 +1,20 @@
 function parse_arg(s::AbstractString, type::Type=Float64)
     if contains("\"", s)
-        type = String
         ret = strip(s, ['\"', ' '])
         return ret
+    end
+    if contains("[", s) && contains("}", s)
+        type = Float64
+        ret = strip(s, ['[', ']', ' '])
+        if contains(" ", ret)
+            ret = tryparse.(type, split(ret, " "))
+            return ret
+        elseif contains(",", ret)
+            ret = tryparse.(type, split(ret, ","))
+            return ret
+        else
+            error(join(["Something wrong with input line: ", s]))
+        end
     end
     val = tryparse(type, s)
     if val !== nothing
@@ -55,6 +67,7 @@ function parse_file(inp_file::String)
     prob_type = nothing
     constr = Symbol[]
     init_val = 0.5
+    out_iter = 0
     for line in eachline(file)
         if line == ""
             break
@@ -155,7 +168,8 @@ function parse_file(inp_file::String)
             end
             mmtop = MMTOProblem(fea, [mat.E for mat in mats], prob_q, prob_s, prob_p)
         elseif line[1:4] == "PLT:"
-            sol, x = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats], [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
+            sol, x, f0, out_iter = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats], [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
+            jldsave("results.jld2"; mmtop, fea, filt, sol, x, f0, out_iter)
             args = parse_line(line)
             if isodd(length(args))
                 folder = parse_arg(args[1])
@@ -167,15 +181,17 @@ function parse_file(inp_file::String)
             for i in init_ind:2:length(args)
                 name = parse_arg(args[i+1])
                 if args[i] == "DENS"
-                    fig = display_solution(:Density, sol, mmtop, x, mat_names=vcat([mat.name for mat in mats], "Пустота"))
+                    fig = display_solution(:Density, sol, mmtop, x, mat_names=vcat([mat.name for mat in mats], ""))
                 elseif args[i] == "STRESS_VM"
-                    fig = display_solution(:VM_Stress, sol, mmtop, x)
+                    fig = display_solution(:VM_Stress, sol, mmtop, x,s_max=[mat.S for mat in mats])
+                elseif args[i] == "STRESS_MS"
+                    fig = display_solution(:MS_Stress, sol, mmtop, x,s_max=[mat.S for mat in mats])
                 elseif args[i] == "STRESS_X"
-                    fig = display_solution(:X_Stress, sol, mmtop, x)
+                    fig = display_solution(:X_Stress, sol, mmtop, x,s_max=[mat.S for mat in mats])
                 elseif args[i] == "STRESS_Y"
-                    fig = display_solution(:Y_Stress, sol, mmtop, x)
+                    fig = display_solution(:Y_Stress, sol, mmtop, x,s_max=[mat.S for mat in mats])
                 elseif args[i] == "STRESS_XY"
-                    fig = display_solution(:XY_Stress, sol, mmtop, x)
+                    fig = display_solution(:XY_Stress, sol, mmtop, x,s_max=[mat.S for mat in mats])
                 elseif args[i] == "DISPL_Y"
                     fig = display_solution(:Y_Displ, sol, mmtop, x)
                 elseif args[i] == "DISPL_X"
@@ -195,5 +211,11 @@ function parse_file(inp_file::String)
 
     close(file)
 
-    return fea, filt, mmtop, sol, x
+    return fea, filt, mmtop, sol, x, out_iter
+end
+
+function load_solution(load_file::String)
+    jldopen(load_file, "w") do file
+        # file["bigdata"] = randn(5)
+    end
 end

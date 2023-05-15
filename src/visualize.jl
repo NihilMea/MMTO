@@ -1,4 +1,4 @@
-function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x::Matrix{Float64}; mat_names::Vector{String}=String[], facets::Bool=false)
+function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x::Matrix{Float64}; s_max::Vector{Float64}=Float64[],mat_names::Vector{String} = String[], facets::Bool=false)
     if type == :Density
         val, w = calc_mat_type(mmtop, x)
         mat_num = length(mmtop.E0)
@@ -48,28 +48,44 @@ function display_solution(type::Symbol, sol::FEASolution, mmtop::MMTOProblem, x:
         fig = viz(mmtop.fea, u, colorbar=true, colornum=16, showfacets=facets, colorbar_name="мм")
     elseif type == :VM_Stress
         val, w = calc_mat_type(mmtop, x)
-        σ = calc_stress(mmtop.fea, sol, :vM)
-        σ[val.<0.5] .= NaN
+        mat_num = length(mmtop.E0)
+        mat = argmax.(eachrow(w))
+        σ = calc_stress(mmtop, sol, x, s_max, :vM)
+        σ[mat .== mat_num ] .= NaN
         σ[mmtop.fixed_elements] .= NaN
         fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
     elseif type == :X_Stress
         val, w = calc_mat_type(mmtop, x)
-        σ = calc_stress(mmtop.fea, sol, :x)
-        σ[val.<0.5] .= NaN
+        mat_num = length(mmtop.E0)
+        mat = argmax.(eachrow(w))
+        σ = calc_stress(mmtop, sol, x, s_max, :x)
+        σ[mat .== mat_num] .= NaN
         σ[mmtop.fixed_elements] .= NaN
         fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
-    elseif type == :X_Stress
+    elseif type == :Y_Stress
         val, w = calc_mat_type(mmtop, x)
-        σ = calc_stress(mmtop.fea, sol, :y)
-        σ[val.<0.5] .= NaN
+        mat_num = length(mmtop.E0)
+        mat = argmax.(eachrow(w))
+        σ = calc_stress(mmtop, sol, x, s_max, :y)
+        σ[mat .== mat_num] .= NaN
         σ[mmtop.fixed_elements] .= NaN
         fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
-    elseif type == :X_Stress
+    elseif type == :XY_Stress
         val, w = calc_mat_type(mmtop, x)
-        σ = calc_stress(mmtop.fea, sol, :y)
-        σ[val.<0.5] .= NaN
+        mat_num = length(mmtop.E0)
+        mat = argmax.(eachrow(w))
+        σ = calc_stress(mmtop, sol, x, s_max, :xy)
+        σ[mat .== mat_num] .= NaN
         σ[mmtop.fixed_elements] .= NaN
         fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="МПа")
+    elseif type == :MS_Stress
+        val, w = calc_mat_type(mmtop, x)
+        mat_num = length(mmtop.E0)
+        mat = argmax.(eachrow(w))
+        σ = calc_stress(mmtop, sol, x, s_max, :MS)
+        σ[mat .== mat_num] .= NaN
+        σ[mmtop.fixed_elements] .= NaN
+        fig = viz(mmtop.fea, σ, colorbar=true, colornum=16, showfacets=facets, colorbar_name="")
     else
         error("Wrong display type")
     end
@@ -126,11 +142,11 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
     dx = maximum(vertices[:, 1]) - minimum(vertices[:, 1])
     dy = maximum(vertices[:, 2]) - minimum(vertices[:, 2])
     if dx / dy > 1.0
-        res = (1280,1280*(dy+16)/dx)
+        res = (720, 720 * (dy + 16) / dx)
     else
-        res = (1280*(dx+16)/dy,1280)
+        res = (720 * (dx + 16) / dy, 720)
     end
-    fig = Mke.Figure(resolution = res)
+    fig = Mke.Figure(resolution=res)
     ax, msh = Mke.mesh(fig[1, 1], vertices, faces, color=colors, colorrange=lims, colormap=colmap, shading=false, nan_color=:white)
     ax.aspect = Mke.AxisAspect(dx / dy)
     if legend
@@ -140,9 +156,9 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
         leg_colors = [get(colmap, (round(Int, b * val + k) - lims[1]) / (lims[2] - lims[1])) for val in mats]
         elems = [Mke.PolyElement(color=color, strokecolor=:transparent) for color in leg_colors]
         if dx / dy > 1.0
-            Mke.Legend(fig[2, 1], elems, legend_names,orientation = :horizontal, tellwidth = false, tellheight = true)
+            Mke.Legend(fig[2, 1], elems, legend_names, orientation=:horizontal, tellwidth=false, tellheight=true,framevisible = false)
         else
-            Mke.Legend(fig[1, 2], elems, legend_names)
+            Mke.Legend(fig[1, 2], elems, legend_names,framevisible = false)
         end
 
     end
@@ -176,9 +192,9 @@ function viz(fea::FEAProblem, values::Vector{<:Real}; showfacets::Bool=false,
     end
     if colorbar
         if dx / dy > 1.0
-            Mke.Colorbar(fig[2, 1], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name,vertical = false,flipaxis = false,alignmode=Mke.Outside(20))
+            Mke.Colorbar(fig[2, 1], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name, vertical=false, flipaxis=false, alignmode=Mke.Outside(20))
         else
-            Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name,alignmode=Mke.Outside(20))
+            Mke.Colorbar(fig[1, 2], colormap=colmap, limits=lims, ticks=Mke.LinearTicks(colornum + 3), label=colorbar_name, alignmode=Mke.Outside(20))
         end
     end
     Mke.resize_to_layout!(fig)
