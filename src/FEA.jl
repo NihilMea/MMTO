@@ -1,5 +1,3 @@
-
-
 Point2D = SVector{2,Float64}
 
 """
@@ -90,6 +88,11 @@ function FEAProblem(a::Float64, b::Float64, el_x::Float64, el_y::Float64, t::Flo
     return FEAProblem(num_el, num_nd, num_dof, nodes_coords, dofs_at_nodes, nodes_at_elems, elems_coords, el_x, el_y,
         el_x * el_y * t, Ke0, Bσ, D0, E, load_values, load_dofs, disp_values, disp_dofs)
 end
+
+function set_E!(fea::FEAProblem, E::Float64)
+    fea.E .= E
+end
+
 
 """
 Building initial element stiffness matrix
@@ -234,7 +237,7 @@ function set_bc!(fea::FEAProblem, type::Symbol, value::Float64, direction::Union
         end
     end
 
-    if !(typeof(direction) isa Vector{Symbol})
+    if !(typeof(direction) == Vector{Symbol})
         direction = [direction]
     end
 
@@ -323,6 +326,64 @@ function calc_stress(fea::FEAProblem, sol::FEASolution, type::Symbol)
     end
     return σ
 end
+
+# """
+# Calculation of nodal stress
+# """
+# function calc_node_stress(fea::FEAProblem, sol::FEASolution, type::Symbol)
+#     X = SMatrix{4,2}([0.0 0.0
+#         fea.el_x 0.0
+#         fea.el_x fea.el_y
+#         0.0 fea.el_y])
+#     gp = 1.0 / sqrt(3.0)
+#     xi = SVector{4}([-gp, gp, gp, -gp])
+#     eta = SVector{4}([-gp, -gp, gp, gp])
+#     Bσ = zeros(SMatrix{3,8}, 4)
+#     # Loop over the Gauss points
+#     for i in eachindex(xi)
+#         # Calculate the derivatives of the shape functions with respect to xi
+#         dN1_dxi = -0.25 * (1 - eta[i])
+#         dN2_dxi = 0.25 * (1 - eta[i])
+#         dN3_dxi = 0.25 * (1 + eta[i])
+#         dN4_dxi = -0.25 * (1 + eta[i])
+#         # Calculate the derivatives of the shape functions with respect to eta
+#         dN1_deta = -0.25 * (1 - xi[i])
+#         dN2_deta = -0.25 * (1 + xi[i])
+#         dN3_deta = 0.25 * (1 + xi[i])
+#         dN4_deta = 0.25 * (1 - xi[i])
+#         # Calculate the derivatives of the shape functions with respect to xi and eta
+#         dN_dxideta = SMatrix{2,4}([dN1_dxi dN2_dxi dN3_dxi dN4_dxi
+#             dN1_deta dN2_deta dN3_deta dN4_deta])
+#         # Calculate the Jacobian matrix
+#         J = dN_dxideta * X
+#         # Calculate the derivatives of the shape functions with respect to x and y
+#         dN_dxdy = inv(J) * dN_dxideta
+#         # Calculate the strain-displacement matrix at element center
+#         Bσ[i] = SMatrix{3,8}([dN_dxdy[1, 1] 0.0 dN_dxdy[1, 2] 0.0 dN_dxdy[1, 3] 0.0 dN_dxdy[1, 4] 0.0
+#             0.0 dN_dxdy[2, 1] 0.0 dN_dxdy[2, 2] 0.0 dN_dxdy[2, 3] 0.0 dN_dxdy[2, 4]
+#             dN_dxdy[2, 1] dN_dxdy[1, 1] dN_dxdy[2, 2] dN_dxdy[1, 2] dN_dxdy[2, 3] dN_dxdy[1, 3] dN_dxdy[2, 4] dN_dxdy[1, 4]])
+#     end
+#     S = zeros(Float64, fea.num_nd, 3)
+#     for i in 1:fea.num_el
+#         el_dofs = elem_dofs(fea, i)
+#         S[i, :] = fea.E[i] * fea.D0 * fea.Bσ * sol.U[el_dofs]
+#     end
+#     T = [1.0 -0.5 0.0
+#         -0.5 1.0 0.0
+#         0.0 0.0 3.0]
+#     if type == :x
+#         σ = S[:, 1]
+#     elseif type == :y
+#         σ = S[:, 2]
+#     elseif type == :xy
+#         σ = S[:, 3]
+#     elseif type == :vM
+#         σ = [sqrt(transpose(s) * T * s) for s in eachrow(S)]
+#     else
+#         error("Wrong output type provided")
+#     end
+#     return σ
+# end
 
 """
 Solver for FEA problem

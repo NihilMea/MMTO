@@ -59,6 +59,8 @@ function Filter(r::Float64, fea::FEAProblem)
     iT = zeros(Int, T_nnz)
     jT = zeros(Int, T_nnz)
     valT = zeros(Float64, T_nnz)
+    valN = zeros(Float64, T_nnz)
+
 
     for i in 1:fea.num_el
         inds = Ke_size * (i - 1) .+ (1:Ke_size)
@@ -71,11 +73,12 @@ function Filter(r::Float64, fea::FEAProblem)
         iT[indsT] = el_dofs
         jT[indsT] = fill(i, Te_size)
         valT[indsT] = Te
+        valN[indsT] = N(0,0)
     end
     Kf = sparse(iK, jK, valK, fea.num_nd, fea.num_nd)
-    Kf = (Kf+transpose(Kf))/2
+    Kf = (Kf + transpose(Kf)) / 2
     T = sparse(iT, jT, valT, fea.num_nd, fea.num_el)
-    T_mean = transpose(T) / Ve
+    T_mean = transpose(sparse(iT, jT, valN, fea.num_nd, fea.num_el))
     return Filter(Kf, T, T_mean, r)
 end
 
@@ -85,4 +88,18 @@ function apply_filter(filt::Filter, x::AbstractVector{Float64})
     C = cholesky(Kf)
     ρ = filt.T_mean * (C \ (T * x))
     return ρ
+end
+
+function apply_filter(filt::Filter, x::AbstractMatrix{Float64})
+    Kf = filt.Kf
+    T = filt.T
+    C = cholesky(Kf)
+    ρ = filt.T_mean * (C \ (T * x))
+    return ρ
+end
+
+function apply_projection!(β::Float64, x::AbstractMatrix{Float64}, dρdx::AbstractMatrix{Float64})
+    dρdx .= β .* exp.(-β .* x) .+ exp(-β)
+    x .= 1 .- exp.(-β .* x) .+ x .* exp(-β)
+    # return ρ, dρdx
 end

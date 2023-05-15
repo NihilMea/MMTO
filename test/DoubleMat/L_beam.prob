@@ -1,0 +1,18 @@
+l = 100.0
+t = 1.0
+d = 1.0
+f = -700.0
+DS: l-l-t d-d # Design Space: dimensions elem_sizes
+BC: L f v (l,2l/5) # Boundary Condition: type value dirs point
+BC: D 0 (u,v) (0.0,l) (2l/5,l) # Boundary Condition: type value dirs point1 point2
+FR: 4d # Filter Radius
+#MT: "сталь" 2.1e5 7.2e-6 700.0 0.1 #MaTerial: mat_name E dens s_max v_max 
+MT: "титан" 1.1e5 4.5e-6 500.0 0.1 #MaTerial: mat_name E dens s_max v_max 
+MT: "алюминий" 0.71e5 2.8e-6 350.0 0.2 #MaTerial: mat_name E dens s_max v_max
+#PP: 3.0 0.5 20.0 600 COMPLIANCE VOLUME # Problem Parameters: iter_num, prob_type and constraints
+PP: [0.9,0.9] 3.0 0.5 20.0 600 MASS STRESS # Problem Parameters: init_val E_pen S_pen P_pow iter_num prob_type(COMPLIANCE,MASS) constraints(STRESS, VOLUME) 
+SR: P (2l/5,2l/5) (l,l) #Set Region: Passive region
+SR: F (l-4.0,2l/5-4.0) (l,2l/5) #Set Region: Fixed region
+PLT: DENS "dens" STRESS_VM "stress" STRESS_MS "stressMS" DISPL_Y "displ" # PLoTs: type and file name
+
+
