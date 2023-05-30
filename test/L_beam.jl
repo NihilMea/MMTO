@@ -2,7 +2,7 @@ using MMTO
 using GLMakie
 
 l = 100.0
-d = 2.0
+d = 1.0
 
 fea = FEAProblem(l, l, d, d, 1.0);
 set_bc!(fea, :load, -700.0 / (2/d+1), :v, Point2D(l - 2, 2l / 5), Point2D(l, 2l / 5))

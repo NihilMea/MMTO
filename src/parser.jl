@@ -159,7 +159,7 @@ function parse_file(inp_file::String)
             end
             mmtop = MMTOProblem(fea, [mat.E for mat in mats], prob_q, prob_s, prob_p)
         elseif args[1] == "PLT:"
-            sol, x, f0_arr,fi, vol, mass, out_iter = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats], [mat.rho for mat in mats], [mat.S for mat in mats], iter_num)
+            sol, x, f0_arr,fi, vol, mass, out_iter = solve(mmtop, prob_type, constr, filt, false, init_val, [mat.V_lim for mat in mats], [mat.dens for mat in mats], [mat.S for mat in mats], iter_num)
             jldsave("results.jld2"; mmtop, fea, filt, sol, x, f0_arr, fi, vol, mass, out_iter)
             if isodd(length(args) - 1)
                 folder = parse_arg(args[2])
