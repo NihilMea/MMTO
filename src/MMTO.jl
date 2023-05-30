@@ -19,7 +19,7 @@ include("MMASolver.jl")
 struct Material
     name::String
     E::Float64
-    rho::Float64
+    dens::Float64
     S::Float64
     V_lim::Float64
 end
