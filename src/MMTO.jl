@@ -5,6 +5,7 @@ import GLMakie as Mke
 
 
 export Point2D, FEAProblem, calc_stress, set_E!, set_bc!, solve, solve!, elem_dofs
+export Material
 export stress_constraint!, region_update!, MSIMP!
 export Filter, apply_filter
 export MMTOProblem, set_region!, calc_mat_type
@@ -15,8 +16,13 @@ include("FEA.jl")
 include("Filter.jl")
 include("MMASolver.jl")
 
-
-
+struct Material
+    name::String
+    E::Float64
+    rho::Float64
+    S::Float64
+    V_lim::Float64
+end
 struct MMTOProblem
     fea::FEAProblem
     # topopt region values
@@ -128,10 +134,8 @@ function compliance!(mmtop::MMTOProblem, df0dx::SubArray{Float64}, sol::FEASolut
         df0dx[i, :] .= -dE[el_id, :] .* uKu
         f0 += E[el_id] .* uKu
     end
-    f = maximum(abs.(sol.F))
-    df0dx ./= f
     # f0 = dot(sol.U, sol.F)
-    return f0 / f
+    return f0
 end
 
 function mass!(mmtop::MMTOProblem, df0dx::SubArray{Float64}, x::SubArray{Float64}, dens::Vector{Float64})
@@ -288,7 +292,7 @@ function calc_stress(mmtop::MMTOProblem, sol::FEASolution, x::Matrix{Float64}, �
     for (i, el_id) in enumerate(act_elems)
         el_dofs = elem_dofs(mmtop.fea, el_id)
         σ = D0 * B * sol.U[el_dofs]
-        σ_pen[i, :] = (w[el_id, mats[i]] * mmtop.E0[mats[i]] ).* σ
+        σ_pen[i, :] = (w[el_id, mats[i]] * mmtop.E0[mats[i]]) .* σ
     end
 
     if type == :x
@@ -429,9 +433,15 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
 
     if targ == :Mass_min
         f0 = mass!(mmtop, df0dx, ρ, dens)
+        f0_arr = [f0]
     elseif targ == :Compl_min
         f0 = compliance!(mmtop, df0dx, sol, E, dE)
+        f0_arr = [f0]
+        f = maximum(abs.(sol.F))
+        df0dx ./= f
+        f0 /= f
     end
+
 
     df0dx_full .= apply_filter(filt, df0dx_full)
     fi = zeros(m)
@@ -481,10 +491,15 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
             f0_new = mass!(mmtop, df0dx, ρ, dens)
             f0_prev = f0
             f0 = f0_new
+            push!(f0_arr, f0)
         elseif targ == :Compl_min
             f0_new = compliance!(mmtop, df0dx, sol, E, dE)
             f0_prev = f0
             f0 = f0_new
+            push!(f0_arr, f0)
+            f = maximum(abs.(sol.F))
+            df0dx ./= f
+            f0 /= f
         end
 
         df0dx_full .= apply_filter(filt, df0dx_full)
@@ -530,7 +545,23 @@ function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Sym
             exit_flag = false
         end
     end
-    return sol, ρ_all, f0, outit
+
+
+    q = 1.0
+    M = length(dens)
+    w = zeros(size(x_all, 1), M)
+    for i in 1:M
+        if i == 1
+            w[:, i] = prod(x_all[:, 1:(M-i)] .^ q, dims=2)
+        else
+            w[:, i] = (1 .- x_all[:, M-i+1]) .^ q .* prod(x_all[:, 1:(M-i)] .^ q, dims=2)
+        end
+    end
+    act_el = mmtop.active_elements .| mmtop.fixed_elements
+    vol = sum(w[act_el, :] .* mmtop.fea.Ve, dims=1)/length(findall(act_el))/mmtop.fea.Ve
+    mass = sum((w[act_el, :] .* transpose(dens)) .* mmtop.fea.Ve, dims=1)
+
+    return sol, ρ_all, f0_arr,fi, vol, mass, outit
 end
 
 function solve(mmtop::MMTOProblem, targ::Symbol, constr::Union{Symbol,Vector{Symbol}}, filt::Filter, use_proj::Bool, x::Matrix{Float64}, V_lim::Vector{Float64}, dens::Vector{Float64}, σ_max::Vector{Float64}, maxoutit::Int, cur_it::Int)
